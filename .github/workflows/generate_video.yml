@@ -26,6 +26,11 @@ on:
           - text
           - image
           - video
+          - image_to_video
+      image_url:
+        description: 'Public image URL (required for image_to_video)'
+        required: false
+        type: string
       job_id:
         description: 'Job ID to track the request'
         required: false
@@ -86,17 +91,20 @@ jobs:
             --webhook "${{ github.event.inputs.webhook_url }}" \
             --cookies cookies.txt \
             --mode "${{ github.event.inputs.mode }}" \
+            --image-url "${{ github.event.inputs.image_url }}" \
             --job-id "${{ github.event.inputs.job_id }}"
 
       - name: Run Playwright Script (Repository Dispatch)
         if: github.event_name == 'repository_dispatch'
         run: |
           MODE=$(jq -r '.client_payload.mode // "auto"' "$GITHUB_EVENT_PATH")
+          IMAGE_URL=$(jq -r '.client_payload.image_url // ""' "$GITHUB_EVENT_PATH")
           python meta_ai_bot.py \
             --prompt "${{ github.event.client_payload.prompt }}" \
             --webhook "${{ github.event.client_payload.webhook_url }}" \
             --cookies cookies.txt \
             --mode "$MODE" \
+            --image-url "$IMAGE_URL" \
             --job-id "${{ github.event.client_payload.job_id }}"
       # ──────────────────────────────────────────────────────────
 

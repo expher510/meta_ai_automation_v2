@@ -73,6 +73,17 @@ python meta_ai_bot.py \
 ```bash
 python meta_ai_bot.py \
   --mode image_to_video \
+  --image-url "https://your-public-image-url/image.png" \
+  --cookies "cookies.local.json" \
+  --prompt "animate the attached image into a natural talking-head video with subtle blinking" \
+  --webhook "https://your-webhook"
+```
+
+You can still use local file mode instead of URL:
+
+```bash
+python meta_ai_bot.py \
+  --mode image_to_video \
   --image-path "C:\path\to\your\image.png" \
   --cookies "cookies.local.json" \
   --prompt "animate the attached image into a natural talking-head video with subtle blinking" \
@@ -102,10 +113,11 @@ Inputs:
 - `webhook_url` (required)
 - `cookies_b64` (required)
 - `mode` (required, default `auto`)
+- `image_url` (optional, required when `mode=image_to_video` unless local `--image-path` is used)
 - `job_id` (optional)
 
 Recommendation: send an explicit `mode` (`text` / `image` / `video` / `image_to_video`) and avoid `auto` for production.
-`image_to_video` requires `--image-path` (local file path) in the script.
+`image_to_video` requires image source: `image_url` (recommended for GitHub Actions) or local `--image-path`.
 
 ### Trigger with `repository_dispatch`
 
@@ -119,7 +131,8 @@ Expected `client_payload`:
   "prompt": "generate image about [a cyberpunk street at night]",
   "webhook_url": "https://your-webhook",
   "cookies_b64": "BASE64_COOKIES_STRING",
-  "mode": "image",
+  "mode": "image_to_video",
+  "image_url": "https://your-public-image-url/image.png",
   "job_id": "optional-job-id"
 }
 ```

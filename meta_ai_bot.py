@@ -1,8 +1,11 @@
 import argparse
 import base64
+import mimetypes
 import os
 import sys
+import tempfile
 import time
+from urllib.parse import urlparse
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -314,6 +317,103 @@ class AttachmentUploader:
         self.page.wait_for_timeout(2000)
 
 
+class ImageSourceResolver:
+    def __init__(self):
+        self._temp_files: List[str] = []
+
+    def resolve(self, image_path: Optional[str], image_url: Optional[str]) -> str:
+        if image_path:
+            if not os.path.isfile(image_path):
+                raise FileNotFoundError(f"Image file not found: {image_path}")
+            return image_path
+        if image_url:
+            return self._download_from_url(image_url)
+        raise ValueError("Either image_path or image_url is required for image_to_video mode")
+
+    def cleanup(self) -> None:
+        for temp_file in self._temp_files:
+            try:
+                os.remove(temp_file)
+            except OSError:
+                pass
+        self._temp_files.clear()
+
+    def _download_from_url(self, image_url: str) -> str:
+        safe_log(f"Downloading image URL: {image_url}")
+        response = self._fetch_image_response(image_url)
+
+        parsed = urlparse(image_url)
+        ext_from_url = os.path.splitext(parsed.path)[1].lower()
+        content_type = (response.headers.get("content-type") or "").split(";")[0].strip().lower()
+        ext_from_type = mimetypes.guess_extension(content_type) if content_type else None
+        suffix = ext_from_url or ext_from_type or ".png"
+        if suffix not in [".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".heif", ".bmp"]:
+            suffix = ".png"
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+            temp_file.write(response.content)
+            temp_path = temp_file.name
+
+        self._temp_files.append(temp_path)
+        safe_log(f"Image downloaded to temp file: {temp_path}")
+        return temp_path
+
+    def _fetch_image_response(self, image_url: str):
+        candidates = self._build_url_candidates(image_url)
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/122.0.0.0 Safari/537.36"
+            ),
+            "Accept": "image/*,*/*;q=0.8",
+            "Referer": "https://search.brave.com/",
+        }
+        errors = []
+        for candidate in candidates:
+            try:
+                response = requests.get(candidate, headers=headers, timeout=60, allow_redirects=True)
+                response.raise_for_status()
+                return response
+            except Exception as error:
+                errors.append(f"{candidate} -> {error}")
+        raise RuntimeError("Failed to download image URL. Attempts: " + " | ".join(errors))
+
+    def _build_url_candidates(self, image_url: str) -> List[str]:
+        candidates = [image_url]
+        parsed = urlparse(image_url)
+        if "imgs.search.brave.com" in parsed.netloc:
+            if "/g:ce/" in parsed.path:
+                encoded_full = parsed.path.split("/g:ce/", 1)[1].replace("/", "")
+                decoded_url = self._try_decode_base64_url(encoded_full)
+                if decoded_url and decoded_url not in candidates:
+                    candidates.append(decoded_url)
+            segments = [segment for segment in parsed.path.split("/") if segment]
+            for segment in segments:
+                if not segment.startswith("aHR0"):
+                    continue
+                decoded_url = self._try_decode_base64_url(segment)
+                if decoded_url and decoded_url not in candidates:
+                    candidates.append(decoded_url)
+        return candidates
+
+    @staticmethod
+    def _try_decode_base64_url(value: str) -> Optional[str]:
+        padding = "=" * ((4 - len(value) % 4) % 4)
+        decoded = None
+        try:
+            decoded = base64.urlsafe_b64decode(value + padding).decode("utf-8", errors="ignore")
+        except Exception:
+            try:
+                decoded = base64.b64decode(value + padding).decode("utf-8", errors="ignore")
+            except Exception:
+                return None
+        decoded = decoded.strip()
+        if decoded.startswith("http://") or decoded.startswith("https://"):
+            return decoded
+        return None
+
+
 class BaseModeHandler:
     mode_name = "base"
 
@@ -516,8 +616,10 @@ class MetaAIBot:
         job_id: Optional[str],
         test_cookies: bool,
         image_path: Optional[str] = None,
+        image_url: Optional[str] = None,
     ) -> None:
         webhook_client = WebhookClient(webhook_url)
+        image_resolver = ImageSourceResolver()
 
         with sync_playwright() as playwright:
             safe_log("Launching browser...")
@@ -566,8 +668,9 @@ class MetaAIBot:
                 baseline = extractor.baseline_text_candidates()
 
                 if self.mode == "image_to_video":
+                    resolved_image_path = image_resolver.resolve(image_path=image_path, image_url=image_url)
                     uploader = AttachmentUploader(page)
-                    uploader.upload_image(image_path or "")
+                    uploader.upload_image(resolved_image_path)
 
                 chat_input.click()
                 page.keyboard.type(prompt)
@@ -605,6 +708,7 @@ class MetaAIBot:
             finally:
                 safe_log("Closing browser...")
                 browser.close()
+                image_resolver.cleanup()
 
 
 def main() -> None:
@@ -621,12 +725,13 @@ def main() -> None:
         help="Expected response mode; isolates logic per output type",
     )
     parser.add_argument("--image-path", required=False, default=None, help="Local image path used only with image_to_video mode")
+    parser.add_argument("--image-url", required=False, default=None, help="Public image URL used only with image_to_video mode")
 
     args = parser.parse_args()
     if not args.test_cookies and not args.prompt:
         parser.error("--prompt is required unless --test-cookies is used")
-    if args.mode == "image_to_video" and not args.image_path:
-        parser.error("--image-path is required when --mode image_to_video is used")
+    if args.mode == "image_to_video" and not args.image_path and not args.image_url:
+        parser.error("--image-path or --image-url is required when --mode image_to_video is used")
 
     bot = MetaAIBot(mode=args.mode)
     bot.run(
@@ -636,6 +741,7 @@ def main() -> None:
         job_id=args.job_id,
         test_cookies=args.test_cookies,
         image_path=args.image_path,
+        image_url=args.image_url,
     )
 
 

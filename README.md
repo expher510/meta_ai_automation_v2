@@ -9,6 +9,9 @@ The bot accepts a prompt + cookies, then sends result to your webhook as one of:
 - `none`
 - `error`
 
+> Important: `auto` mode is currently unstable/not reliable.  
+> Use explicit mode only: `text`, `image`, or `video`.
+
 ## What Changed
 
 - OOP refactor in `meta_ai_bot.py`:
@@ -75,6 +78,8 @@ python meta_ai_bot.py \
   --webhook "https://your-webhook"
 ```
 
+Warning: `auto` is not reliable right now. Keep it for testing only.
+
 ## GitHub Actions
 
 Workflow file: `.github/workflows/generate_video.yml`
@@ -87,6 +92,8 @@ Inputs:
 - `cookies_b64` (required)
 - `mode` (required, default `auto`)
 - `job_id` (optional)
+
+Recommendation: send an explicit `mode` (`text` / `image` / `video`) and avoid `auto` for production.
 
 ### Trigger with `repository_dispatch`
 
@@ -106,6 +113,8 @@ Expected `client_payload`:
 ```
 
 If `mode` is missing, workflow defaults to `auto`.
+
+Warning: defaulting to `auto` may return inconsistent behavior. Prefer sending `mode` explicitly.
 
 ## Webhook Payload
 
@@ -146,4 +155,3 @@ Notes:
   - verify URL is public and reachable
 - Action not triggered:
   - check token `repo` scope and event type `run_meta_ai`
-

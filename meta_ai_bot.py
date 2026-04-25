@@ -1,5 +1,6 @@
 import argparse
 import base64
+import os
 import sys
 import time
 from dataclasses import dataclass, field
@@ -291,6 +292,28 @@ class ResponseExtractor:
         return " ".join((text or "").split()).strip()
 
 
+class AttachmentUploader:
+    def __init__(self, page):
+        self.page = page
+
+    def upload_image(self, image_path: str) -> None:
+        if not image_path:
+            raise ValueError("image_path is required for image_to_video mode")
+        if not os.path.isfile(image_path):
+            raise FileNotFoundError(f"Image file not found: {image_path}")
+
+        safe_log(f"Uploading image: {image_path}")
+        add_attachment_btn = self.page.get_by_role("button", name="Add attachment")
+        add_attachment_btn.wait_for(state="visible", timeout=20000)
+        add_attachment_btn.click()
+
+        file_input = self.page.locator("input[type='file']").first
+        file_input.wait_for(state="attached", timeout=10000)
+        file_input.set_input_files(image_path)
+        # Meta UI can clear file-input value after attachment, so we only wait briefly.
+        self.page.wait_for_timeout(2000)
+
+
 class BaseModeHandler:
     mode_name = "base"
 
@@ -392,6 +415,10 @@ class VideoModeHandler(BaseModeHandler):
         )
 
 
+class ImageToVideoModeHandler(VideoModeHandler):
+    mode_name = "image_to_video"
+
+
 class AutoModeHandler(BaseModeHandler):
     mode_name = "auto"
 
@@ -477,9 +504,19 @@ class MetaAIBot:
             return ImageModeHandler(timeout_seconds=180)
         if self.mode == "video":
             return VideoModeHandler(timeout_seconds=240)
+        if self.mode == "image_to_video":
+            return ImageToVideoModeHandler(timeout_seconds=300)
         return AutoModeHandler(timeout_seconds=240)
 
-    def run(self, prompt: Optional[str], webhook_url: Optional[str], cookies_input: str, job_id: Optional[str], test_cookies: bool) -> None:
+    def run(
+        self,
+        prompt: Optional[str],
+        webhook_url: Optional[str],
+        cookies_input: str,
+        job_id: Optional[str],
+        test_cookies: bool,
+        image_path: Optional[str] = None,
+    ) -> None:
         webhook_client = WebhookClient(webhook_url)
 
         with sync_playwright() as playwright:
@@ -528,6 +565,10 @@ class MetaAIBot:
                 extractor = ResponseExtractor(page)
                 baseline = extractor.baseline_text_candidates()
 
+                if self.mode == "image_to_video":
+                    uploader = AttachmentUploader(page)
+                    uploader.upload_image(image_path or "")
+
                 chat_input.click()
                 page.keyboard.type(prompt)
                 page.keyboard.press("Enter")
@@ -575,14 +616,17 @@ def main() -> None:
     parser.add_argument("--test-cookies", action="store_true", help="Validate cookies only")
     parser.add_argument(
         "--mode",
-        choices=["auto", "text", "image", "video"],
+        choices=["auto", "text", "image", "video", "image_to_video"],
         default="auto",
         help="Expected response mode; isolates logic per output type",
     )
+    parser.add_argument("--image-path", required=False, default=None, help="Local image path used only with image_to_video mode")
 
     args = parser.parse_args()
     if not args.test_cookies and not args.prompt:
         parser.error("--prompt is required unless --test-cookies is used")
+    if args.mode == "image_to_video" and not args.image_path:
+        parser.error("--image-path is required when --mode image_to_video is used")
 
     bot = MetaAIBot(mode=args.mode)
     bot.run(
@@ -591,6 +635,7 @@ def main() -> None:
         cookies_input=args.cookies,
         job_id=args.job_id,
         test_cookies=args.test_cookies,
+        image_path=args.image_path,
     )
 
 

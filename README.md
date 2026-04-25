@@ -10,7 +10,7 @@ The bot accepts a prompt + cookies, then sends result to your webhook as one of:
 - `error`
 
 > Important: `auto` mode is currently unstable/not reliable.  
-> Use explicit mode only: `text`, `image`, or `video`.
+> Use explicit mode only: `text`, `image`, `video`, or `image_to_video`.
 
 ## What Changed
 
@@ -68,6 +68,17 @@ python meta_ai_bot.py \
   --webhook "https://your-webhook"
 ```
 
+### Run image-to-video mode
+
+```bash
+python meta_ai_bot.py \
+  --mode image_to_video \
+  --image-path "C:\path\to\your\image.png" \
+  --cookies "cookies.local.json" \
+  --prompt "animate the attached image into a natural talking-head video with subtle blinking" \
+  --webhook "https://your-webhook"
+```
+
 ### Run auto mode (detect first available output)
 
 ```bash
@@ -93,7 +104,8 @@ Inputs:
 - `mode` (required, default `auto`)
 - `job_id` (optional)
 
-Recommendation: send an explicit `mode` (`text` / `image` / `video`) and avoid `auto` for production.
+Recommendation: send an explicit `mode` (`text` / `image` / `video` / `image_to_video`) and avoid `auto` for production.
+`image_to_video` requires `--image-path` (local file path) in the script.
 
 ### Trigger with `repository_dispatch`
 

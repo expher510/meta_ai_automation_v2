@@ -1,0 +1,111 @@
+name: Meta AI Automation
+on:
+  repository_dispatch:
+    types: [run_meta_ai]
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: 'Prompt sent to Meta AI'
+        required: true
+        type: string
+      webhook_url:
+        description: 'Webhook URL to receive result'
+        required: true
+        type: string
+      cookies_b64:
+        description: 'Base64 encoded cookies (JSON/Netscape)'
+        required: true
+        type: string
+      mode:
+        description: 'Expected output type'
+        required: true
+        type: choice
+        default: auto
+        options:
+          - auto
+          - text
+          - image
+          - video
+      job_id:
+        description: 'Job ID to track the request'
+        required: false
+        type: string
+
+jobs:
+  run-automation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      # ─── Cache pip + Playwright ────────────────────────────────
+      # أول run: بيحمل كل حاجة ويحفظها على GitHub Cache Storage
+      # كل run بعد كده: بيجيب من الـ Cache (20 ثانية بدل 5 دقايق)
+      - name: Cache pip + Playwright browsers
+        uses: actions/cache@v3
+        id: cache-deps
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.cache/ms-playwright
+          key: deps-${{ runner.os }}-py3.10-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            deps-${{ runner.os }}-py3.10-
+      # ──────────────────────────────────────────────────────────
+
+      # ✅ بيشتغل دايماً — لكن بيبقى سريع جداً لو الـ cache موجود
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          playwright install --with-deps chromium
+
+      # ─── Save Cookies ──────────────────────────────────────────
+      - name: Save Cookies to File (Workflow Dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          jq -r '.inputs.cookies_b64' "$GITHUB_EVENT_PATH" | base64 -d > cookies.txt
+
+      - name: Save Cookies to File (Repository Dispatch)
+        if: github.event_name == 'repository_dispatch'
+        run: |
+          jq -r '.client_payload.cookies_b64' "$GITHUB_EVENT_PATH" | base64 -d > cookies.txt
+      # ──────────────────────────────────────────────────────────
+
+      # ─── Run Script ────────────────────────────────────────────
+      - name: Run Playwright Script (Workflow Dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          python meta_ai_bot.py \
+            --prompt "${{ github.event.inputs.prompt }}" \
+            --webhook "${{ github.event.inputs.webhook_url }}" \
+            --cookies cookies.txt \
+            --mode "${{ github.event.inputs.mode }}" \
+            --job-id "${{ github.event.inputs.job_id }}"
+
+      - name: Run Playwright Script (Repository Dispatch)
+        if: github.event_name == 'repository_dispatch'
+        run: |
+          MODE=$(jq -r '.client_payload.mode // "auto"' "$GITHUB_EVENT_PATH")
+          python meta_ai_bot.py \
+            --prompt "${{ github.event.client_payload.prompt }}" \
+            --webhook "${{ github.event.client_payload.webhook_url }}" \
+            --cookies cookies.txt \
+            --mode "$MODE" \
+            --job-id "${{ github.event.client_payload.job_id }}"
+      # ──────────────────────────────────────────────────────────
+
+      # ─── On Failure ────────────────────────────────────────────
+      - name: Upload Error Screenshot
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: error-screenshot
+          path: error_screenshot.png
+          if-no-files-found: ignore
+      # ──────────────────────────────────────────────────────────

@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Cookies & Credentials
+*cookie*.txt
+*cookie*.json
+.env
+secret.json
+
+# Logs & Debug
+error_screenshot.png
+*.log
+page.html
+temp_upload_img.jpg
